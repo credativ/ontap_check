@@ -55,7 +55,6 @@ class AggrSummary(nagiosplugin.Summary):
 
 class Clusterlinks(ONTAPResource):
   """clusterlinks - check HA-interconnect and cluster links"""
-
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       cluster = ClusterPeer()
@@ -134,20 +133,10 @@ class Disk(ONTAPResource):
         elif disk['state'] == 'reconstructing':
           print(f'rebuilding: {rebuilding}')
           rebuilding += 1
-        # elif 'aggregates' in list(disk):
-        # # else:
-        #   print(disk['aggregates'])
-        #   for aggregate in disk['aggregates']:
-        #     aggregate.get()
-        #     if aggregate['state'] in ['online', 'onlining', 'relocating']:
-        #       print(f'aggregate: {aggregate_count}')
-        #       aggregate_count += 1
-    # print(f'{spare}, {rebuilding}, {failed}, {aggregate_count}')
     return [nagiosplugin.Metric(f'spare disks', spare, context='disk'),
             nagiosplugin.Metric(f'rebuilding disks', rebuilding, context='disk'),
             nagiosplugin.Metric(f'failed disks', failed, context='disk'),
             nagiosplugin.Metric(f'diskcount', diskcount, context='disk')]
-            # nagiosplugin.Metric(f'aggregate disks', aggregate_count, context='disk')]
 
 class DiskScalarContext(nagiosplugin.ScalarContext):
   def __init__(self, name, warning=None, critical=None, fmt_metric='{name} is {valueunit}', result_cls=nagiosplugin.Result, diskcount=None):
@@ -258,9 +247,6 @@ class SnapmirrorScalarContext(AdvancedScalarContext):
 
 class Sparedisks(ONTAPResource):
   """sparedisks - check netapp system spare disks"""
-  def __init__(self, hostname, username, password, verify) -> None:
-    super().__init__(hostname, username, password, verify)
-
   def probe(self):
     spare = 0
     zeroed = 0
@@ -268,15 +254,12 @@ class Sparedisks(ONTAPResource):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       disks = ODisk.get_collection(fields='container_type,state')
       for disk in disks:
-        # disk.get()
         if disk['container_type'] == 'spare':
           spare += 1
           if disk['state'] == 'zeroing':
             zeroed += 1
         elif disk['container_type'] == 'unassigned':
           unassigned += 1
-    # print(f'spare: {spare}, zeroed: {zeroed}, unassigned: {unassigned}')
-    # return [nagiosplugin.Metric(f'spare disks', spare, context='sparedisks'),
     return [nagiosplugin.Metric(f'zeroing disks', zeroed, context='sparedisks'),
             nagiosplugin.Metric(f'unassigned disks', unassigned, context='sparedisks')]
 
@@ -405,7 +388,6 @@ class Quota(ONTAPResource):
               if quota.qtree.name not in ['', '*']:
                 yield nagiosplugin.Metric(f'quota {quota.volume.name}/{quota.qtree.name}: {space_hard_limit} {quota.space.used.total} {files_hard_limit} {quota.files.used.total}', space_used_hard_limit_percent, '%', context='quota')
 
-#Volume Health
 class Volume_Health(ONTAPResource):
   """volume_health - check volume health"""
   def probe(self):
@@ -414,16 +396,14 @@ class Volume_Health(ONTAPResource):
       for volume in volumes:
         yield nagiosplugin.Metric(f'{volume.name}', {'state': volume.state, 'ok_condition': ['online']}, context='volume_health')
 
-#Node Health
 class Node_Health(ONTAPResource):
-  """node_health - node health"""
+  """node_health - check node health"""
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       nodes = Node.get_collection(fields='statistics')
       for node in nodes:
         yield nagiosplugin.Metric(f'{node.name}', {'state': node.statistics.status, 'ok_condition': ['ok']}, context='node_health')
 
-#Node CPU utilization
 class Node_Cpu(ONTAPResource):
   """node_cpu - node cpu utilization"""
   def probe(self):
@@ -443,113 +423,113 @@ def main():
   parser.add_argument('-H', '--hostname')
   parser.add_argument('-U', '--username')
   parser.add_argument('-p', '--password')
-  parser.add_argument('-i', '--insecure', action='store_false', default=True)
+  parser.add_argument('-i', '--insecure', action='store_false', default=True, help='disable ssl certificate check')
   parser.add_argument('-v', '--verbose', action='count', default=0,
                     help='increase output verbosity (use up to 3 times)')
-  subparsers = parser.add_subparsers(help='Aggregate check', dest='check', description="aggr - Check aggregate real space usage")
+  subparsers = parser.add_subparsers(dest='check')
   # check aggr
-  parser_aggr = subparsers.add_parser('aggr')
-  parser_aggr.add_argument('-w', '--warning', metavar='RANGE', default='',
+  subparser = subparsers.add_parser('aggr', description="aggr - Check aggregate real space usage")
+  subparser.add_argument('-w', '--warning', metavar='RANGE', default='',
                     help='return warning if load is outside RANGE')
-  parser_aggr.add_argument('-c', '--critical', metavar='RANGE', default='',
+  subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
                     help='return critical if load is outside RANGE')
-  parser_aggr.add_argument('-r', '--regexp', default='',
+  subparser.add_argument('-r', '--regexp', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('-A', '--aggr', default='',
+  subparser.add_argument('-A', '--aggr', default='',
                     help='aggregate name')
   # check clusterlinks
-  parser_aggr = subparsers.add_parser('clusterlinks')
+  subparser = subparsers.add_parser('clusterlinks', description="clusterlinks - check HA-interconnect and cluster links")
   # check global
-  parser_aggr = subparsers.add_parser('global')
-  parser_aggr.add_argument('--plugin', default='',
+  subparser = subparsers.add_parser('global', description="global - check powersupplies, fans, nvram status, temp or global health")
+  subparser.add_argument('--plugin', default='',
                     help='plugin choices are power, fan, nvram, temp, health')
   # check disk
-  parser_aggr = subparsers.add_parser('disk')
-  parser_aggr.add_argument('-w', '--warning', metavar='RANGE', default='0',
+  subparser = subparsers.add_parser('disk', description="disk - check netapp system disk state")
+  subparser.add_argument('-w', '--warning', metavar='RANGE', default='0',
                     help='return warning if load is outside RANGE')
-  parser_aggr.add_argument('-c', '--critical', metavar='RANGE', default='',
+  subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
                     help='return critical if load is outside RANGE')
-  parser_aggr.add_argument('-d', '--diskcount', default='',
+  subparser.add_argument('-d', '--diskcount', default='',
                     help='number of expected disks')
   # check multipath
-  parser_aggr = subparsers.add_parser('multipath')
+  subparser = subparsers.add_parser('multipath', description="multipath - check if all disks are multipathed (4 paths)")
   # check fcp
-  parser_aggr = subparsers.add_parser('fcp')
+  subparser = subparsers.add_parser('fcp', description="fcp - check fcp interfaces")
   # check interface_health
-  parser_aggr = subparsers.add_parser('interface_health')
-  # check interfaces
-  parser_aggr = subparsers.add_parser('port_health')
+  subparser = subparsers.add_parser('interface_health', description="interface_health - check interface status, home-node and home-port")
+  # check port_health
+  subparser = subparsers.add_parser('port_health', description="port_health - check if port is enabled and up")
   # check snapmirror
-  parser_aggr = subparsers.add_parser('snapmirror')
-  parser_aggr.add_argument('--lag', default='',
+  subparser = subparsers.add_parser('snapmirror', description="snapmirror - check snapmirror healthness")
+  subparser.add_argument('--lag', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('--volume', default='',
+  subparser.add_argument('--volume', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('--vserver', default='',
+  subparser.add_argument('--vserver', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('--exclude', default='',
+  subparser.add_argument('--exclude', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('--regexp', default='',
+  subparser.add_argument('--regexp', default='',
                     help='regex matching the name of the aggregate')
   # check sparedisks
-  parser_aggr = subparsers.add_parser('sparedisks')
+  subparser = subparsers.add_parser('sparedisks', description="sparedisks - check netapp system spare disks")
   # check volume
-  parser_aggr = subparsers.add_parser('volume')
-  parser_aggr.add_argument('-w', '--size-warning', dest='size_warning', metavar='RANGE', default='',
+  subparser = subparsers.add_parser('volume', description="volume - check volume usage")
+  subparser.add_argument('-w', '--size-warning', dest='size_warning', metavar='RANGE', default='',
                     help='return warning if space is outside RANGE')
-  parser_aggr.add_argument('-c', '--size-critical', dest='size_critical', metavar='RANGE', default='',
+  subparser.add_argument('-c', '--size-critical', dest='size_critical', metavar='RANGE', default='',
                     help='return critical if space is outside RANGE')
-  parser_aggr.add_argument('--inode-warning', dest='inode_warning', metavar='RANGE', default='',
+  subparser.add_argument('--inode-warning', dest='inode_warning', metavar='RANGE', default='',
                     help='return warning if inode is outside RANGE')
-  parser_aggr.add_argument('--inode-critical', dest='inode_critical', metavar='RANGE', default='',
+  subparser.add_argument('--inode-critical', dest='inode_critical', metavar='RANGE', default='',
                     help='return critical if inode is outside RANGE')
-  parser_aggr.add_argument('--snap-warning', dest='snap_warning', metavar='RANGE', default='',
+  subparser.add_argument('--snap-warning', dest='snap_warning', metavar='RANGE', default='',
                     help='return warning if snap is outside RANGE')
-  parser_aggr.add_argument('--snap-critical', dest='snap_critical', metavar='RANGE', default='',
+  subparser.add_argument('--snap-critical', dest='snap_critical', metavar='RANGE', default='',
                     help='return critical if snap is outside RANGE')
-  parser_aggr.add_argument('--snap-ignore', dest='snap_ignore', metavar='store_true', default=False,
+  subparser.add_argument('--snap-ignore', dest='snap_ignore', metavar='store_true', default=False,
                     help='ignore snap')
-  parser_aggr.add_argument('-V', '--volume', default='',
+  subparser.add_argument('-V', '--volume', default='',
                     help='select volume')
-  parser_aggr.add_argument('--volumelist', default='',
+  subparser.add_argument('--volumelist', default='',
                     help='select volume list')
-  parser_aggr.add_argument('--vserver', default='',
+  subparser.add_argument('--vserver', default='',
                     help='select vserver/svm')
-  parser_aggr.add_argument('--regexp', default='',
+  subparser.add_argument('--regexp', default='',
                     help='regex matching the name of the volume')
-  parser_aggr.add_argument('--exclude', default='',
+  subparser.add_argument('--exclude', default='',
                     help='exclude volume list')
   # check metrocluster_state
-  parser_aggr = subparsers.add_parser('metrocluster_state')
+  subparser = subparsers.add_parser('metrocluster_state', description="metrocluster_state - check metrocluster state")
   # check metrocluster_config
-  parser_aggr = subparsers.add_parser('metrocluster_config')
+  subparser = subparsers.add_parser('metrocluster_config', description="metrocluster_config - check metrocluster config replication")
   # check metrocluster_check
-  parser_aggr = subparsers.add_parser('metrocluster_check')
+  subparser = subparsers.add_parser('metrocluster_check', description="metrocluster_check - netapp mcc metrocluster check")
   # check metrocluster_aggr
-  parser_aggr = subparsers.add_parser('metrocluster_aggr')
+  subparser = subparsers.add_parser('metrocluster_aggr', description="metrocluster_aggr - check metrocluster aggregate state")
   # check quota
-  parser_aggr = subparsers.add_parser('quota')
-  parser_aggr.add_argument('-w', '--warning', metavar='RANGE', default='0',
+  subparser = subparsers.add_parser('quota', description="quota - check quota usage")
+  subparser.add_argument('-w', '--warning', metavar='RANGE', default='0',
                     help='return warning if load is outside RANGE')
-  parser_aggr.add_argument('-c', '--critical', metavar='RANGE', default='',
+  subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
                     help='return critical if load is outside RANGE')
-  parser_aggr.add_argument('-V', '--volume', default='',
+  subparser.add_argument('-V', '--volume', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('-t', '--target', default='',
+  subparser.add_argument('-t', '--target', default='',
                     help='regex matching the name of the aggregate')
-  parser_aggr.add_argument('--vserver', default='',
+  subparser.add_argument('--vserver', default='',
                     help='regex matching the name of the aggregate')
   # check volume_health
-  parser_aggr = subparsers.add_parser('volume_health')
-  # check node_cpu
-  parser_aggr = subparsers.add_parser('node_cpu')
-  parser_aggr.add_argument('-w', '--warning', metavar='RANGE', default='',
-                    help='return warning if load is outside RANGE')
-  parser_aggr.add_argument('-c', '--critical', metavar='RANGE', default='',
-                    help='return critical if load is outside RANGE')
+  subparser = subparsers.add_parser('volume_health', description="volume_health - check volume health")
   # check node_health
-  parser_aggr = subparsers.add_parser('node_health')
+  subparser = subparsers.add_parser('node_health', description="node_health - check node health")
   args = parser.parse_args()
+  # check node_cpu
+  subparser = subparsers.add_parser('node_cpu', description="node_cpu - node cpu utilization")
+  subparser.add_argument('-w', '--warning', metavar='RANGE', default='',
+                    help='return warning if load is outside RANGE')
+  subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
+                    help='return critical if load is outside RANGE')
 
   if args.check == 'aggr':
     check = nagiosplugin.Check(
@@ -619,14 +599,14 @@ def main():
     check = nagiosplugin.Check(
         Volume_Health(args.hostname, args.username, args.password, args.insecure),
         AdvancedScalarContext(args.check)) #, AggrSummary())
-  elif args.check == 'node_cpu':
-    check = nagiosplugin.Check(
-        Node_Cpu(args.hostname, args.username, args.password, args.insecure),
-        nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
   elif args.check == 'node_health':
     check = nagiosplugin.Check(
         Node_Health(args.hostname, args.username, args.password, args.insecure),
         AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'node_cpu':
+    check = nagiosplugin.Check(
+        Node_Cpu(args.hostname, args.username, args.password, args.insecure),
+        nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
   else:
     sys.exit('Check does not exist. Use --help')
   check.main(verbose=args.verbose)
