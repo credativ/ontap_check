@@ -4,7 +4,7 @@
 
 import nagiosplugin
 from netapp_ontap.host_connection import HostConnection
-from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, QuotaReport
+from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, QuotaReport, IpInterface
 from netapp_ontap.error import NetAppRestError
 import argparse
 import re, sys
@@ -173,12 +173,32 @@ class Fcp(ONTAPResource):
         interface.get(fields='statistics,metric')
         yield nagiosplugin.Metric(f'{interface.name}', { 'state': interface.statistics.status, 'ok_condition': ['ok'] }, context='fcp')
 
-class Interfaces(ONTAPResource):
-  """interfaces - check cdot interface groups status"""
-  pass
+class Interface_Health(ONTAPResource):
+  """interface_health - check interface status, home-node and home-port"""
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      interfaces = IpInterface.get_collection(fields='enabled,scope,state,statistics.status,svm,location')
+      for interface in interfaces:
+        if interface.scope == 'svm':
+          output_description = f'svm {interface.svm.name} lif {interface.name}'
+        else:
+          output_description = f'cluster interface {interface.name}'
+        yield nagiosplugin.Metric(f'{output_description} status', {'state': interface.statistics.status, 'ok_condition': ['ok']}, context='interface_health')
+        yield nagiosplugin.Metric(f'{output_description} node', {'state': interface.location.node.name, 'ok_condition': [interface.location.home_node.name]}, context='interface_health')
+        yield nagiosplugin.Metric(f'{output_description} port', {'state': interface.location.port.name, 'ok_condition': [interface.location.home_port.name]}, context='interface_health')
 
-# ???
-#Port Health
+class Port_Health(ONTAPResource):
+  """port_health - check if port is enabled and up"""
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      interfaces = IpInterface.get_collection(fields='enabled,scope,state,statistics.status,svm')
+      for interface in interfaces:
+        if interface.scope == 'svm':
+          output_description = f'lif {interface.svm.name} {interface.name}'
+        else:
+          output_description = f'cluster interface {interface.name}'
+        yield nagiosplugin.Metric(f'{output_description} enabled', {'state': interface.enabled, 'ok_condition': [True]}, context='port_health')
+        yield nagiosplugin.Metric(f'{output_description} state', {'state': interface.state, 'ok_condition': ['up']}, context='port_health')
 
 class Snapmirror(ONTAPResource):
   """snapmirror - check snapmirror healthness"""
@@ -294,13 +314,13 @@ class Metrocluster_State(ONTAPResource):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       metrocluster = Metrocluster()
       metrocluster.get(fields='local,local.mode,local.periodic_check_enabled,remote,remote.mode,remote.periodic_check_enabled')
-      return [nagiosplugin.Metric('metrocluster state', {'state': metrocluster.local.configuration_state, 'ok_condition': ['configured']}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster mode', {'state': metrocluster.local.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster periodic check', {'state': metrocluster.local.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster partner reachable', {'state': metrocluster.local.partner_cluster_reachable, 'ok_condition': [True]}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster state', {'state': metrocluster.remote.configuration_state, 'ok_condition': ['configured']}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster mode', {'state': metrocluster.remote.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
-              nagiosplugin.Metric('metrocluster periodic check', {'state': metrocluster.remote.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state')]
+      return [nagiosplugin.Metric('metrocluster local state', {'state': metrocluster.local.configuration_state, 'ok_condition': ['configured']}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster local mode', {'state': metrocluster.local.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster local periodic check', {'state': metrocluster.local.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster remote partner reachable', {'state': metrocluster.local.partner_cluster_reachable, 'ok_condition': [True]}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster remote state', {'state': metrocluster.remote.configuration_state, 'ok_condition': ['configured']}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster remote mode', {'state': metrocluster.remote.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
+              nagiosplugin.Metric('metrocluster remote periodic check', {'state': metrocluster.remote.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state')]
 
 class Metrocluster_Check(ONTAPResource):
   """metrocluster_check - netapp mcc metrocluster check"""
@@ -412,6 +432,10 @@ def main():
                     help='number of expected disks')
   # check fcp
   parser_aggr = subparsers.add_parser('fcp')
+  # check interface_health
+  parser_aggr = subparsers.add_parser('interface_health')
+  # check interfaces
+  parser_aggr = subparsers.add_parser('port_health')
   # check snapmirror
   parser_aggr = subparsers.add_parser('snapmirror')
   parser_aggr.add_argument('--lag', default='',
@@ -497,6 +521,14 @@ def main():
   elif args.check == 'fcp':
     check = nagiosplugin.Check(
         Fcp(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'interface_health':
+    check = nagiosplugin.Check(
+        Interface_Health(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'port_health':
+    check = nagiosplugin.Check(
+        Port_Health(args.hostname, args.username, args.password, args.insecure),
         AdvancedScalarContext(args.check)) #, AggrSummary())
   elif args.check == 'snapmirror':
     check = nagiosplugin.Check(
