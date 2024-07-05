@@ -4,7 +4,7 @@
 
 import nagiosplugin
 from netapp_ontap.host_connection import HostConnection
-from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, QuotaReport, IpInterface
+from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation QuotaReport, IpInterface
 from netapp_ontap.error import NetAppRestError
 import argparse
 import re, sys
@@ -322,9 +322,32 @@ class Metrocluster_State(ONTAPResource):
               nagiosplugin.Metric('metrocluster remote mode', {'state': metrocluster.remote.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
               nagiosplugin.Metric('metrocluster remote periodic check', {'state': metrocluster.remote.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state')]
 
+class Metrocluster_Config(ONTAPResource):
+  """metrocluster_config - check metrocluster config replication"""
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      metrocluster_svms = MetroclusterSvm.get_collection(fields='configuration_state,smv.name')
+      metrocluster_diagnostics = MetroclusterDiagnostics()
+      metrocluster_diagnostics.get(fields='config_replication')
+      yield nagiosplugin.Metric('config replication', {'state': metrocluster_diagnostics.config_replication.state, 'ok_condition': ['ok']}, context='metrocluster_config')
+      for metrocluster_svm in metrocluster_svms:
+        yield nagiosplugin.Metric(f'svm {metrocluster_svm.svm.name} config state', {'state': metrocluster_svm.configuration_state, 'ok_condition': ['healthy']}, context='metrocluster_config')
+
 class Metrocluster_Check(ONTAPResource):
   """metrocluster_check - netapp mcc metrocluster check"""
-  pass
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      metrocluster_operations = MetroclusterOperation.get_collection(fields='state,type')
+      for operation in metrocluster_operations:
+        yield nagiosplugin.Metric(f'operation {operation.type}', {'state': operation.state, 'ok_condition': ['successful']}, context='metrocluster_check')
+
+class Metrocluster_Aggr(ONTAPResource):
+  """metrocluster_aggr - check metrocluster aggregate state"""
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      metrocluster_diagnostics = MetroclusterDiagnostics()
+      metrocluster_diagnostics.get(fields='aggregate')
+      return nagiosplugin.Metric('metrocluster aggregates', {'state': metrocluster_diagnostics.aggregate.state, 'ok_condition': ['ok']}, context='metrocluster-aggr')
 
 class Quota(ONTAPResource):
   """quota - check quota usage"""
@@ -478,6 +501,12 @@ def main():
                     help='exclude volume list')
   # check metrocluster_state
   parser_aggr = subparsers.add_parser('metrocluster_state')
+  # check metrocluster_config
+  parser_aggr = subparsers.add_parser('metrocluster_config')
+  # check metrocluster_check
+  parser_aggr = subparsers.add_parser('metrocluster_check')
+  # check metrocluster_aggr
+  parser_aggr = subparsers.add_parser('metrocluster_aggr')
   # check quota
   parser_aggr = subparsers.add_parser('quota')
   parser_aggr.add_argument('-w', '--warning', metavar='RANGE', default='0',
@@ -545,6 +574,18 @@ def main():
   elif args.check == 'metrocluster_state':
     check = nagiosplugin.Check(
         Metrocluster_State(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'metrocluster_config':
+    check = nagiosplugin.Check(
+        Metrocluster_Config(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'metrocluster_check':
+    check = nagiosplugin.Check(
+        Metrocluster_Check(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
+  elif args.check == 'metrocluster_aggr':
+    check = nagiosplugin.Check(
+        Metrocluster_Aggr(args.hostname, args.username, args.password, args.insecure),
         AdvancedScalarContext(args.check)) #, AggrSummary())
   elif args.check == 'quota':
     check = nagiosplugin.Check(
