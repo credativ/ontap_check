@@ -4,7 +4,7 @@
 
 import nagiosplugin
 from netapp_ontap.host_connection import HostConnection
-from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation QuotaReport, IpInterface
+from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation, QuotaReport, IpInterface, Shelf
 from netapp_ontap.error import NetAppRestError
 import argparse
 import re, sys
@@ -162,7 +162,25 @@ class DiskScalarContext(nagiosplugin.ScalarContext):
 
 class Multipath(ONTAPResource):
   """multipath - check if all disks are multipathed (4 paths)"""
-  pass
+  def probe(self):
+    with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
+      metrocluster = Metrocluster()
+      metrocluster.get(fields='configuration_type,local')
+      disks = ODisk.get_collection(fields='container_type,name,node,paths,shelf')
+      number_of_paths = 4
+      if metrocluster.local.configuration_state == 'configured':
+        if metrocluster.configuration_type == 'stretch':
+          number_of_paths = 2
+        elif metrocluster.configuration_type in ['fabric', 'ip_fabric']:
+          number_of_paths = 8
+      for disk in disks:
+        disk.shelf.get(fields='module_type')
+        if disk.shelf.module_type == 'iom12f':
+          number_of_paths = 8
+        elif disk.shelf.module_type == 'psm3e':
+          number_of_paths = 2
+        if disk.container_type != 'unknown':
+          yield nagiosplugin.Metric(f'disk {disk.node.name}/{disk.name} multipath', {'state': len(disk.paths), 'ok_condition': [number_of_paths]}, context='multipath')
 
 class Fcp(ONTAPResource):
   """fcp - check fcp interfaces"""
@@ -453,6 +471,8 @@ def main():
                     help='return critical if load is outside RANGE')
   parser_aggr.add_argument('-d', '--diskcount', default='',
                     help='number of expected disks')
+  # check multipath
+  parser_aggr = subparsers.add_parser('multipath')
   # check fcp
   parser_aggr = subparsers.add_parser('fcp')
   # check interface_health
@@ -547,6 +567,10 @@ def main():
     check = nagiosplugin.Check(
         Disk(args.hostname, args.username, args.password, args.insecure),
         DiskScalarContext(args.check, args.warning, args.critical, diskcount=args.diskcount)) #, AggrSummary())
+  elif args.check == 'multipath':
+    check = nagiosplugin.Check(
+        Multipath(args.hostname, args.username, args.password, args.insecure),
+        AdvancedScalarContext(args.check)) #, AggrSummary())
   elif args.check == 'fcp':
     check = nagiosplugin.Check(
         Fcp(args.hostname, args.username, args.password, args.insecure),
