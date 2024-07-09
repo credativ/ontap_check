@@ -117,25 +117,33 @@ class Disk(ONTAPResource):
   def probe(self):
     spare = 0
     rebuilding = 0
-    aggregate_count = 0
+    aggregate = 0
     failed = 0
+    failed_disks = []
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      disks = ODisk.get_collection()
-      diskcount = len(list(disks))
+      disks = list(ODisk.get_collection(fields='container_type,state'))
+      diskcount = len(disks)
       for disk in disks:
-        disk.get()
-        if disk['state'] == 'spare':
-          print(f'spare: {spare}')
+        if disk['container_type'] in ['shared', 'aggregate']:
+          if disk['state'] == 'reconstructing':
+            rebuilding += 1
+          else:
+            if disk['state'] == 'removed':
+              rebuilding += 1
+            else:
+              aggregate += 1
+        elif disk['container_type'] == 'spare':
           spare += 1
-        elif disk['state'] == 'broken':
-          print(f'failed: {failed}')
-          failed += 1
-        elif disk['state'] == 'reconstructing':
-          print(f'rebuilding: {rebuilding}')
-          rebuilding += 1
+        else:
+          if disk['state'] == 'broken' and disk['container_type'] == 'maintenance':
+            failed += 1
+            failed_disks.append(disk.name)
+          else:
+            aggregate += 1
     return [nagiosplugin.Metric(f'spare disks', spare, context='disk'),
             nagiosplugin.Metric(f'rebuilding disks', rebuilding, context='disk'),
-            nagiosplugin.Metric(f'failed disks', failed, context='disk'),
+            nagiosplugin.Metric(f'aggregate disks', aggregate, context='disk'),
+            nagiosplugin.Metric(f'failed disks{" " + failed_disks if len(failed_disks) != 0 else ""}', failed, context='disk'),
             nagiosplugin.Metric(f'diskcount', diskcount, context='disk')]
 
 class DiskScalarContext(nagiosplugin.ScalarContext):
@@ -147,6 +155,9 @@ class DiskScalarContext(nagiosplugin.ScalarContext):
     if 'diskcount' in metric.name:
       self.warning = nagiosplugin.Range(None)
       self.critical = self.diskcount
+    if not 'failed' in metric.name:
+      self.warning = nagiosplugin.Range(None)
+      self.critical = nagiosplugin.Range(None)
     return super().evaluate(metric, resource)
 
 class Multipath(ONTAPResource):
@@ -449,7 +460,7 @@ def main():
                     help='return warning if load is outside RANGE')
   subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
                     help='return critical if load is outside RANGE')
-  subparser.add_argument('-d', '--diskcount', default='',
+  subparser.add_argument('-d', '--disks', default='',
                     help='number of expected disks')
   # check multipath
   subparser = subparsers.add_parser('multipath', description="multipath - check if all disks are multipathed (4 paths)")
@@ -546,7 +557,7 @@ def main():
   elif args.check == 'disk':
     check = nagiosplugin.Check(
         Disk(args.hostname, args.username, args.password, args.insecure),
-        DiskScalarContext(args.check, args.warning, args.critical, diskcount=args.diskcount)) #, AggrSummary())
+        DiskScalarContext(args.check, args.warning, args.critical, diskcount=args.disks)) #, AggrSummary())
   elif args.check == 'multipath':
     check = nagiosplugin.Check(
         Multipath(args.hostname, args.username, args.password, args.insecure),
