@@ -71,15 +71,13 @@ class Global(ONTAPResource):
   def power(self):
     psu_failed = {}
     for node in self.nodes:
-      if node['controller']['failed_power_supply']['count'] == 0:
-        psu_failed.update({ node['name']: node['controller']['failed_power_supply']['count'] })
+      psu_failed.update({ node['name']: node['controller']['failed_power_supply']['count'] })
     return psu_failed
 
   def fan(self):
     fan_failed = {}
     for node in self.nodes:
-      if node['controller']['failed_fan']['count'] != 0:
-        fan_failed.update({ node['name']: node['controller']['failed_fan']['count'] })
+      fan_failed.update({ node['name']: node['controller']['failed_fan']['count'] })
     return fan_failed
 
   def nvram(self):
@@ -106,9 +104,6 @@ class Global(ONTAPResource):
       for node in self.nodes:
         node.get(fields='controller.over_temperature,controller.failed_fan,controller.failed_power_supply,nvram,state')
     result = eval(f'self.{self.plugin}()')
-    print(result)
-    if not len(result):
-      result = {"": 0}
     for node,value in result.items():
       yield nagiosplugin.Metric(f'{self.plugin} - {node}', value, context=self.plugin)
 
