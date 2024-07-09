@@ -6,6 +6,8 @@ import nagiosplugin
 from netapp_ontap.host_connection import HostConnection
 from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation, QuotaReport, IpInterface, Shelf
 from netapp_ontap.error import NetAppRestError
+import isodate
+from datetime import timedelta
 import argparse
 import re, sys
 from pprint import pprint as pprint
@@ -222,33 +224,49 @@ class Snapmirror(ONTAPResource):
     self.exclude = exclude.split(',')
     self.regexp = regexp
 
-# @todo: How to handle lag_time properly? It is in ISO-8601 duration format
-# .      regexp option should enable regexp match for exclude list
+  def snapmirror_state(self, snapmirror):
+    if not snapmirror.healthy:
+      state = { 'state': f'{snapmirror.state} - {snapmirror.unhealthy_reason[0].message}', 'ok_condition': ['snapmirrored'] }
+    else:
+      state = { 'state': snapmirror.state, 'ok_condition': ['snapmirrored'] }
+    return nagiosplugin.Metric(f'{snapmirror.destination.path}', state, context='snapmirror')
+
+  def snapmirror_lag(self, snapmirror):
+    return nagiosplugin.Metric(f'{snapmirror.destination.path} lag time', isodate.parse_duration(snapmirror['lag_time']).total_seconds(), context='snapmirror')
+
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      snapmirrors = SnapmirrorRelationship.get_collection(fields='healthy,unhealthy_reason,lag_time,state,source')
+      snapmirrors = SnapmirrorRelationship.get_collection(fields='healthy,unhealthy_reason,lag_time,state,destination')
       for snapmirror in snapmirrors:
-        # snapmirror.get()
-        # print(snapmirror.healthy)
-        print(snapmirror)
-        if (self.volume != '' and self.volume == snapmirror.source.path.split(':')[1]) or (self.vserver != '' and self.vserver == snapmirror.source.svm.name) or \
-           (self.exclude != [''] and snapmirror.source.path.split(':')[1] not in self.exclude) or (self.regexp != '' and re.search(self.regexp, self.exclude)):
-          if not snapmirror.healthy:
-            state = { 'state': f'{snapmirror.state} - {snapmirror.unhealthy_reason[0].message}', 'ok_condition': ['snapmirrored'] }
-            # print(snapmirror.unhealthy_reason)
-          else:
-            state = { 'state': snapmirror.state, 'ok_condition': ['snapmirrored'] }
-          yield nagiosplugin.Metric(f'{snapmirror.source.path}', state, context='snapmirror')
+        if (self.volume != 'all' and self.volume == snapmirror.destination.path.split(':')[1]) or (self.vserver != 'all' and self.vserver == snapmirror.destination.svm.name) or \
+           (self.exclude != [''] and snapmirror.destination.path.split(':')[1] not in self.exclude and not self.regexp):
+          yield self.snapmirror_state(snapmirror)
+          if snapmirror.state == 'snapmirrored':
+            yield self.snapmirror_lag(snapmirror)
+        elif self.regexp:
+          for exclude in self.exclude:
+            if not re.search(exclude, snapmirror.destination.path.split(':')[1]):
+              yield self.snapmirror(snapmirror)
+              if snapmirror.state == 'snapmirrored':
+                yield self.snapmirror_lag(snapmirror)
+        elif self.volume == 'all' and self.vserver == 'all':
+          yield self.snapmirror_state(snapmirror)
+          if snapmirror.state == 'snapmirrored':
+            yield self.snapmirror_lag(snapmirror)
 
 class SnapmirrorScalarContext(AdvancedScalarContext):
   def __init__(self, name, warning=None, critical=None, fmt_metric='{name} is {valueunit}', result_cls=nagiosplugin.Result, lag=None):
     super().__init__(name, warning, critical, fmt_metric, result_cls)
-    self.lag = nagiosplugin.Range(lag)
+    lag_time = timedelta(seconds=lag)
+    self.lag = nagiosplugin.Range(lag_time.total_seconds())
 
   def evaluate(self, metric, resource):
     if 'lag' in metric.name:
       self.warning = nagiosplugin.Range(None)
       self.critical = self.lag
+    else:
+      self.warning = nagiosplugin.Range(None)
+      self.critical = nagiosplugin.Range(None)
     return super().evaluate(metric, resource)
 
 class Sparedisks(ONTAPResource):
@@ -467,16 +485,16 @@ def main():
   subparser = subparsers.add_parser('port_health', description="port_health - check if port is enabled and up")
   # check snapmirror
   subparser = subparsers.add_parser('snapmirror', description="snapmirror - check snapmirror healthness")
-  subparser.add_argument('--lag', default='',
-                    help='regex matching the name of the aggregate')
-  subparser.add_argument('--volume', default='',
-                    help='regex matching the name of the aggregate')
-  subparser.add_argument('--vserver', default='',
-                    help='regex matching the name of the aggregate')
+  subparser.add_argument('--lag', default='100800', type=int,
+                    help='delay in seconds, default 28h')
+  subparser.add_argument('--volume', default='all',
+                    help='name of the destination volume')
+  subparser.add_argument('--vserver', default='all',
+                    help='name of the destination svm')
   subparser.add_argument('--exclude', default='',
-                    help='regex matching the name of the aggregate')
-  subparser.add_argument('--regexp', default='',
-                    help='regex matching the name of the aggregate')
+                    help='list of volume names to be excluded')
+  subparser.add_argument('--regexp', action='store_true', default=False,
+                    help='enable regexp matching for the exclusion list')
   # check sparedisks
   subparser = subparsers.add_parser('sparedisks', description="sparedisks - check netapp system spare disks")
   # check volume
