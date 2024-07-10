@@ -351,20 +351,22 @@ class Metrocluster_Config(ONTAPResource):
   """metrocluster_config - check metrocluster config replication"""
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      metrocluster_svms = MetroclusterSvm.get_collection(fields='configuration_state,smv.name')
+      metrocluster_svms = MetroclusterSvm.get_collection(fields='configuration_state,svm.name')
       metrocluster_diagnostics = MetroclusterDiagnostics()
-      metrocluster_diagnostics.get(fields='config_replication')
-      yield nagiosplugin.Metric('config replication', {'state': metrocluster_diagnostics.config_replication.state, 'ok_condition': ['ok']}, context='metrocluster_config')
+      metrocluster_diagnostics.get(fields='config_replication.state')
+      yield nagiosplugin.Metric('config replication', {'state': metrocluster_diagnostics.config_replication['state'], 'ok_condition': ['ok']}, context='metrocluster_config')
       for metrocluster_svm in metrocluster_svms:
         yield nagiosplugin.Metric(f'svm {metrocluster_svm.svm.name} config state', {'state': metrocluster_svm.configuration_state, 'ok_condition': ['healthy']}, context='metrocluster_config')
 
 class Metrocluster_Check(ONTAPResource):
   """metrocluster_check - netapp mcc metrocluster check"""
   def probe(self):
+    fields = ['aggregate', 'cluster', 'config_replication', 'connection', 'interface', 'node', 'volume']
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      metrocluster_operations = MetroclusterOperation.get_collection(fields='state,type')
-      for operation in metrocluster_operations:
-        yield nagiosplugin.Metric(f'operation {operation.type}', {'state': operation.state, 'ok_condition': ['successful']}, context='metrocluster_check')
+      metrocluster_diagnostics = MetroclusterDiagnostics()
+      metrocluster_diagnostics.get(fields='.state,'.join(fields))
+      for field in fields:
+        yield nagiosplugin.Metric(f'component {field}', {'state': metrocluster_diagnostics[field]['state'], 'ok_condition': ['ok']}, context='metrocluster_check')
 
 class Metrocluster_Aggr(ONTAPResource):
   """metrocluster_aggr - check metrocluster aggregate state"""
@@ -372,7 +374,9 @@ class Metrocluster_Aggr(ONTAPResource):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       metrocluster_diagnostics = MetroclusterDiagnostics()
       metrocluster_diagnostics.get(fields='aggregate')
-      return nagiosplugin.Metric('metrocluster aggregates', {'state': metrocluster_diagnostics.aggregate.state, 'ok_condition': ['ok']}, context='metrocluster-aggr')
+      for detail in metrocluster_diagnostics.aggregate.details:
+        for check in detail.checks:
+          yield nagiosplugin.Metric(f'metrocluster aggregate {detail.aggregate.name} - {check.name}', {'state': check.result, 'ok_condition': ['ok']}, context='metrocluster_aggr')
 
 class Quota(ONTAPResource):
   """quota - check quota usage"""
