@@ -452,7 +452,7 @@ def main():
                     help='increase output verbosity (use up to 3 times)')
   subparsers = parser.add_subparsers(dest='check')
   # check aggr
-  subparser = subparsers.add_parser('aggr', description="aggr - Check aggregate real space usage")
+  subparser = subparsers.add_parser('aggr', description="aggr - check aggregate real space usage")
   subparser.add_argument('-w', '--warning', metavar='RANGE', default='',
                     help='return warning if load is outside RANGE')
   subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
@@ -464,7 +464,7 @@ def main():
   # check clusterlinks
   subparser = subparsers.add_parser('clusterlinks', description="clusterlinks - check HA-interconnect and cluster links")
   # check global
-  subparser = subparsers.add_parser('global', description="global - check powersupplies, fans, nvram status, temp or global health")
+  subparser = subparsers.add_parser('global', description="global - check power supplies, fans, nvram status, temp or global health")
   subparser.add_argument('--plugin', default='',
                     help='plugin choices are power, fan, nvram, temp, health')
   # check disk
@@ -534,26 +534,26 @@ def main():
   # check quota
   subparser = subparsers.add_parser('quota', description="quota - check quota usage")
   subparser.add_argument('-w', '--warning', metavar='RANGE', default='0',
-                    help='return warning if load is outside RANGE')
+                    help='warning threshold for used space in percent')
   subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
-                    help='return critical if load is outside RANGE')
+                    help='critical threshold for used space')
   subparser.add_argument('-V', '--volume', default='',
-                    help='regex matching the name of the aggregate')
+                    help='name of the volume to check the quotas on')
   subparser.add_argument('-t', '--target', default='',
-                    help='regex matching the name of the aggregate')
+                    help='name of the qtree to check the quota')
   subparser.add_argument('--vserver', default='',
-                    help='regex matching the name of the aggregate')
+                    help='name of the svm to check quotas on')
   # check volume_health
   subparser = subparsers.add_parser('volume_health', description="volume_health - check volume health")
   # check node_health
   subparser = subparsers.add_parser('node_health', description="node_health - check node health")
-  args = parser.parse_args()
   # check node_cpu
   subparser = subparsers.add_parser('node_cpu', description="node_cpu - node cpu utilization")
   subparser.add_argument('-w', '--warning', metavar='RANGE', default='',
-                    help='return warning if load is outside RANGE')
+                    help='return warning if cpu usage in percent is outside RANGE')
   subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
-                    help='return critical if load is outside RANGE')
+                    help='return critical if cpu usage in percent is outside RANGE')
+  args = parser.parse_args()
 
   if args.check == 'aggr':
     check = nagiosplugin.Check(
