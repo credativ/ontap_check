@@ -300,16 +300,30 @@ class Volume(ONTAPResource):
 
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      volumes = OVolume.get_collection(fields='svm,state,space.percent_used,space.physical_used_percent,space.snapshot')
+      volumes = OVolume.get_collection(fields='svm,state,space.percent_used,space.physical_used_percent,space.snapshot,files')
       for volume in volumes:
-        if volume.state == 'online' and ((self.volume != '' and volume.name == self.volume) or (self.volumelist != [''] and volume.name in self.volumelist) or \
-                                         (self.vserver != '' and volume.svm.name == self.vserver) or (self.regexp != '' and re.search(self.regexp, volume.name)) or \
-                                         (self.exclude != [''] and volume.name not in self.exclude) or \
-                                         (self.volume == '' and self.volumelist == [''] and self.vserver == '' and self.regexp == '' and self.exclude == [''])):
-          yield nagiosplugin.Metric(f'{volume.name} space', volume.space.percent_used, '%', context='volume')
-          yield nagiosplugin.Metric(f'{volume.name} physical', volume.space.physical_used_percent, '%', context='volume')
-          if not self.ignore:
-            yield nagiosplugin.Metric(f'{volume.name} snap', volume.space.snapshot.space_used_percent, '%', context='volume')
+        if volume.state != 'online':
+          continue
+
+        if self.volume != '' and volume.name != self.volume:
+          continue
+
+        if self.volumelist != [''] and volume.name not in self.volumelist:
+          continue
+
+        if self.vserver != '' and volume.svm.name != self.vserver:
+          continue
+
+        if self.regexp != '' and not re.search(self.regexp, volume.name):
+          continue
+
+        if self.exclude != [''] and volume.name in self.exclude:
+          continue
+
+        yield nagiosplugin.Metric(f'{volume.name} space', volume.space.percent_used, '%', context='volume')
+        yield nagiosplugin.Metric(f'{volume.name} inodes', int(volume.files.used / volume.files.maximum), '%', context='volume')
+        if not self.ignore:
+          yield nagiosplugin.Metric(f'{volume.name} snap', volume.space.snapshot.space_used_percent, '%', context='volume')
 
 class VolumeScalarContext(nagiosplugin.ScalarContext):
   def __init__(self, name, warning=None, critical=None, fmt_metric='{name} is {valueunit}', result_cls=nagiosplugin.Result, inode_warning=None, inode_critical=None, snap_warning=None, snap_critical=None):
@@ -325,7 +339,7 @@ class VolumeScalarContext(nagiosplugin.ScalarContext):
     if 'space' in metric.name:
       self.warning = self.size_warning
       self.critical = self.size_critical
-    elif 'physical' in metric.name:
+    elif 'inodes' in metric.name:
       self.warning = self.inode_warning
       self.critical = self.inode_critical
     elif 'snap' in metric.name:
