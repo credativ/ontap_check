@@ -17,14 +17,29 @@ import warnings
 warnings.simplefilter("ignore")
 
 class AdvancedScalarContext(nagiosplugin.ScalarContext):
+  """Class for defining ScalarContext based on dicts"""
   def evaluate(self, metric, resource):
     if isinstance(metric.value, dict):
-      if metric.value['state'] in metric.value['ok_condition']:
+      if metric.name == 'ignore_missing':
+        return self.result_cls(nagiosplugin.Ok, None, metric)
+      elif metric.value['state'] in metric.value['ok_condition']:
         return self.result_cls(nagiosplugin.Ok, None, metric)
       else:
         return self.result_cls(nagiosplugin.Critical, None, metric)
     else:
       return super().evaluate(metric, resource)
+
+class AdvancedSummary(nagiosplugin.Summary):
+  """Class for defining advanced summaries based on dicts"""
+  def ok(self, results):
+    metric_names = []
+    for result in results:
+      if result.metric.name == 'ignore_missing':
+        return f'no {result.metric.value["name"]} available'
+
+      metric_names.append(result.metric.name)
+
+    return f'Check is OK for %s' % ", ".join(metric_names)
 
 class ONTAPResource(nagiosplugin.Resource):
   def __init__(self, hostname, username, password, verify) -> None:
@@ -181,12 +196,22 @@ class Multipath(ONTAPResource):
 
 class Fcp(ONTAPResource):
   """fcp - check fcp interfaces"""
+  def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
+    super().__init__(hostname, username, password, verify)
+    self.ignore_missing = ignore_missing
+
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       fc_interfaces = FcInterface.get_collection()
+      fc_interface_count = 0
+
       for interface in fc_interfaces:
+        fc_interface_count += 1
         interface.get(fields='statistics,metric')
         yield nagiosplugin.Metric(f'{interface.name}', { 'state': interface.statistics.status, 'ok_condition': ['ok'] }, context='fcp')
+
+      if fc_interface_count == 0 and self.ignore_missing:
+        yield nagiosplugin.Metric('ignore_missing', {'name': 'FCP'}, context='fcp')
 
 class Interface_Health(ONTAPResource):
   """interface_health - check interface status, home-node and home-port"""
@@ -217,12 +242,13 @@ class Port_Health(ONTAPResource):
 
 class Snapmirror(ONTAPResource):
   """snapmirror - check snapmirror healthness"""
-  def __init__(self, hostname, username, password, verify, volume, vserver, exclude, regexp) -> None:
+  def __init__(self, hostname, username, password, verify, volume, vserver, exclude, regexp, ignore_missing) -> None:
     super().__init__(hostname, username, password, verify)
     self.volume = volume
     self.vserver = vserver
     self.exclude = exclude.split(',')
     self.regexp = regexp
+    self.ignore_missing = ignore_missing
 
   def snapmirror_state(self, snapmirror):
     if not snapmirror.healthy:
@@ -237,7 +263,10 @@ class Snapmirror(ONTAPResource):
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       snapmirrors = SnapmirrorRelationship.get_collection(fields='healthy,unhealthy_reason,lag_time,state,destination')
+      snapmirror_count = 0
+
       for snapmirror in snapmirrors:
+        snapmirror_count += 1
         if (self.volume != 'all' and self.volume == snapmirror.destination.path.split(':')[1]) or (self.vserver != 'all' and self.vserver == snapmirror.destination.svm.name) or \
            (self.exclude != [''] and snapmirror.destination.path.split(':')[1] not in self.exclude and not self.regexp):
           yield self.snapmirror_state(snapmirror)
@@ -253,6 +282,9 @@ class Snapmirror(ONTAPResource):
           yield self.snapmirror_state(snapmirror)
           if snapmirror.state == 'snapmirrored':
             yield self.snapmirror_lag(snapmirror)
+
+      if snapmirror_count == 0 and self.ignore_missing:
+        yield nagiosplugin.Metric('ignore_missing', {'name': 'Snapmirror'}, context='snapmirror')
 
 class SnapmirrorScalarContext(AdvancedScalarContext):
   def __init__(self, name, warning=None, critical=None, fmt_metric='{name} is {valueunit}', result_cls=nagiosplugin.Result, lag=None):
@@ -335,10 +367,18 @@ class VolumeScalarContext(nagiosplugin.ScalarContext):
 
 class Metrocluster_State(ONTAPResource):
   """metrocluster_state - check metrocluster state"""
+  def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
+    super().__init__(hostname, username, password, verify)
+    self.ignore_missing = ignore_missing
+
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       metrocluster = Metrocluster()
       metrocluster.get(fields='local,local.mode,local.periodic_check_enabled,remote,remote.mode,remote.periodic_check_enabled')
+
+      if metrocluster.local.configuration_state == 'not_configured' and self.ignore_missing:
+        return nagiosplugin.Metric('ignore_missing', {'name': 'MetroCluster'}, context='metrocluster_state')
+
       return [nagiosplugin.Metric('metrocluster local state', {'state': metrocluster.local.configuration_state, 'ok_condition': ['configured']}, context='metrocluster_state'),
               nagiosplugin.Metric('metrocluster local mode', {'state': metrocluster.local.mode, 'ok_condition': ['normal']}, context='metrocluster_state'),
               nagiosplugin.Metric('metrocluster local periodic check', {'state': metrocluster.local.periodic_check_enabled, 'ok_condition': [True]}, context='metrocluster_state'),
@@ -349,31 +389,76 @@ class Metrocluster_State(ONTAPResource):
 
 class Metrocluster_Config(ONTAPResource):
   """metrocluster_config - check metrocluster config replication"""
+  def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
+    super().__init__(hostname, username, password, verify)
+    self.ignore_missing = ignore_missing
+
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      metrocluster_svms = MetroclusterSvm.get_collection(fields='configuration_state,svm.name')
-      metrocluster_diagnostics = MetroclusterDiagnostics()
-      metrocluster_diagnostics.get(fields='config_replication.state')
+      try:
+        metrocluster_svms = MetroclusterSvm.get_collection(fields='configuration_state,svm.name')
+        metrocluster_diagnostics = MetroclusterDiagnostics()
+        metrocluster_diagnostics.get(fields='config_replication.state')
+      except NetAppRestError as e:
+        if (
+          self.ignore_missing and
+          e.status_code == 500 and
+          'MetroCluster is not configured' in e.response_body['error']['message']
+        ):
+          yield nagiosplugin.Metric('ignore_missing', {'name': 'MetroCluster'}, context='metrocluster_config')
+          return
+        raise
+
       yield nagiosplugin.Metric('config replication', {'state': metrocluster_diagnostics.config_replication['state'], 'ok_condition': ['ok']}, context='metrocluster_config')
       for metrocluster_svm in metrocluster_svms:
         yield nagiosplugin.Metric(f'svm {metrocluster_svm.svm.name} config state', {'state': metrocluster_svm.configuration_state, 'ok_condition': ['healthy']}, context='metrocluster_config')
 
 class Metrocluster_Check(ONTAPResource):
   """metrocluster_check - netapp mcc metrocluster check"""
+  def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
+    super().__init__(hostname, username, password, verify)
+    self.ignore_missing = ignore_missing
+
   def probe(self):
     fields = ['aggregate', 'cluster', 'config_replication', 'connection', 'interface', 'node', 'volume']
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      metrocluster_diagnostics = MetroclusterDiagnostics()
-      metrocluster_diagnostics.get(fields='.state,'.join(fields))
+      try:
+        metrocluster_diagnostics = MetroclusterDiagnostics()
+        metrocluster_diagnostics.get(fields='.state,'.join(fields))
+      except NetAppRestError as e:
+        if (
+          self.ignore_missing and
+          e.status_code == 500 and
+          'MetroCluster is not configured' in e.response_body['error']['message']
+        ):
+          yield nagiosplugin.Metric('ignore_missing', {'name': 'MetroCluster'}, context='metrocluster_check')
+          return
+        raise
+
       for field in fields:
         yield nagiosplugin.Metric(f'component {field}', {'state': metrocluster_diagnostics[field]['state'], 'ok_condition': ['ok']}, context='metrocluster_check')
 
 class Metrocluster_Aggr(ONTAPResource):
   """metrocluster_aggr - check metrocluster aggregate state"""
+  def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
+    super().__init__(hostname, username, password, verify)
+    self.ignore_missing = ignore_missing
+
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      metrocluster_diagnostics = MetroclusterDiagnostics()
-      metrocluster_diagnostics.get(fields='aggregate')
+      try:
+        metrocluster_diagnostics = MetroclusterDiagnostics()
+        metrocluster_diagnostics.get(fields='aggregate')
+      except NetAppRestError as e:
+        if (
+          self.ignore_missing and
+          e.status_code == 500 and
+          'MetroCluster is not configured' in e.response_body['error']['message']
+        ):
+          yield nagiosplugin.Metric('ignore_missing', {'name': 'MetroCluster'}, context='metrocluster_aggr')
+          return
+        raise
+
       for detail in metrocluster_diagnostics.aggregate.details:
         for check in detail.checks:
           yield nagiosplugin.Metric(f'metrocluster aggregate {detail.aggregate.name} - {check.name}', {'state': check.result, 'ok_condition': ['ok']}, context='metrocluster_aggr')
@@ -454,6 +539,7 @@ def main():
   parser.add_argument('-i', '--insecure', action='store_false', default=True, help='disable ssl certificate check')
   parser.add_argument('-v', '--verbose', action='count', default=0,
                     help='increase output verbosity (use up to 3 times)')
+  parser.add_argument('--ignore-missing', action='store_true', default=False, help='Ignore entities which do not exist')
   subparsers = parser.add_subparsers(dest='check')
   # check aggr
   subparser = subparsers.add_parser('aggr', description="aggr - check aggregate real space usage")
@@ -581,8 +667,9 @@ def main():
         AdvancedScalarContext(args.check)) #, AggrSummary())
   elif args.check == 'fcp':
     check = nagiosplugin.Check(
-        Fcp(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        Fcp(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
+        AdvancedScalarContext(args.check),
+        AdvancedSummary())
   elif args.check == 'interface_health':
     check = nagiosplugin.Check(
         Interface_Health(args.hostname, args.username, args.password, args.insecure),
@@ -593,8 +680,9 @@ def main():
         AdvancedScalarContext(args.check)) #, AggrSummary())
   elif args.check == 'snapmirror':
     check = nagiosplugin.Check(
-        Snapmirror(args.hostname, args.username, args.password, args.insecure, args.volume, args.vserver, args.exclude, args.regexp),
-        SnapmirrorScalarContext(args.check, lag=args.lag)) #, AggrSummary())
+        Snapmirror(args.hostname, args.username, args.password, args.insecure, args.volume, args.vserver, args.exclude, args.regexp, args.ignore_missing),
+        SnapmirrorScalarContext(args.check, lag=args.lag),
+        AdvancedSummary())
   elif args.check == 'sparedisks':
     check = nagiosplugin.Check(
         Sparedisks(args.hostname, args.username, args.password, args.insecure),
@@ -605,20 +693,24 @@ def main():
         VolumeScalarContext(args.check, args.size_warning, args.size_critical, inode_warning=args.inode_warning, inode_critical=args.inode_critical, snap_warning=args.snap_warning, snap_critical=args.snap_critical)) #, AggrSummary())
   elif args.check == 'metrocluster_state':
     check = nagiosplugin.Check(
-        Metrocluster_State(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        Metrocluster_State(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
+        AdvancedScalarContext(args.check),
+        AdvancedSummary())
   elif args.check == 'metrocluster_config':
     check = nagiosplugin.Check(
-        Metrocluster_Config(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        Metrocluster_Config(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
+        AdvancedScalarContext(args.check),
+        AdvancedSummary())
   elif args.check == 'metrocluster_check':
     check = nagiosplugin.Check(
-        Metrocluster_Check(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        Metrocluster_Check(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
+        AdvancedScalarContext(args.check),
+        AdvancedSummary())
   elif args.check == 'metrocluster_aggr':
     check = nagiosplugin.Check(
-        Metrocluster_Aggr(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        Metrocluster_Aggr(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
+        AdvancedScalarContext(args.check),
+        AdvancedSummary())
   elif args.check == 'quota':
     check = nagiosplugin.Check(
         Quota(args.hostname, args.username, args.password, args.insecure, args.volume, args.target, args.vserver),
