@@ -122,7 +122,49 @@ class Global(ONTAPResource):
         node.get(fields='controller.over_temperature,controller.failed_fan,controller.failed_power_supply,nvram,state')
     result = eval(f'self.{self.plugin}()')
     for node,value in result.items():
-      yield nagiosplugin.Metric(f'{self.plugin} - {node}', value, context=self.plugin)
+      yield nagiosplugin.Metric(f'{node}', value, context=self.plugin)
+
+class GlobalSummary(nagiosplugin.Summary):
+  """GlobalSummary - Defines the output format for the global subcommand"""
+  def __init__(self, plugin):
+    super().__init__()
+    self.plugin = plugin
+
+  def ok(self, results):
+    result_plugin = None
+    summary_text = "Everything is fine"
+
+    if self.plugin == "power":
+      summary_text = "No failed power supplies"
+    elif self.plugin == "fan":
+      summary_text = "No failed fans"
+    elif self.plugin == "nvram":
+      summary_text = "No failed NVRAM"
+    elif self.plugin == "temp":
+      summary_text = "Temperature OK"
+    elif self.plugin == "health":
+      summary_text = "Health Status OK"
+    return summary_text
+
+  def problem(self, results):
+    failed_entities = []
+    summary_text = "An error ocurred"
+
+    for result in results:
+      if result.state.code != 0:
+        failed_entities.append(result.metric.name)
+
+    if self.plugin == "power":
+      summary_text = f"{len(failed_entities)} failed power supplie(s): {', '.join(failed_entities)}"
+    elif self.plugin == "fan":
+      summary_text = f"{len(failed_entities)} failed fan(s): {', '.join(failed_entities)}"
+    elif self.plugin == "nvram":
+      summary_text = f"{len(failed_entities)} failed nvram(s): {', '.join(failed_entities)}"
+    elif self.plugin == "temp":
+      summary_text = f"Temperature Overheating: {', '.join(failed_entities)}"
+    elif self.plugin == "health":
+      summary_text = f"Health Status Critical: {', '.join(failed_entities)}"
+    return summary_text
 
 class Disk(ONTAPResource):
   """disk - check netapp system disk state"""
@@ -579,8 +621,13 @@ def main():
   subparser = subparsers.add_parser('clusterlinks', description="clusterlinks - check HA-interconnect and cluster links")
   # check global
   subparser = subparsers.add_parser('global', description="global - check power supplies, fans, nvram status, temp or global health")
+  subparser.add_argument('-w', '--warning', metavar='RANGE', default='',
+                    help='return warning if psu or fan count is outside RANGE')
+  subparser.add_argument('-c', '--critical', metavar='RANGE', default='',
+                    help='return critical if psu or fan count is outside RANGE')
   subparser.add_argument('--plugin', default='',
-                    help='plugin choices are power, fan, nvram, temp, health')
+                    help='plugin choices are power, fan, nvram, temp, health',
+                    choices=['power', 'fan', 'nvram', 'temp', 'health'])
   # check disk
   subparser = subparsers.add_parser('disk', description="disk - check netapp system disk state")
   subparser.add_argument('-w', '--warning', metavar='RANGE', default='0',
@@ -683,7 +730,8 @@ def main():
   elif args.check == 'global':
     check = nagiosplugin.Check(
         Global(args.hostname, args.username, args.password, args.insecure, args.plugin),
-        AdvancedScalarContext(args.plugin, fmt_metric=f'{args.plugin} is {{value}}')) #, AggrSummary())
+        AdvancedScalarContext(args.plugin, args.warning, args.critical),
+        GlobalSummary(args.plugin))
   elif args.check == 'disk':
     check = nagiosplugin.Check(
         Disk(args.hostname, args.username, args.password, args.insecure),
