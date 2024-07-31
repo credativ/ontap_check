@@ -272,20 +272,30 @@ class SnapmirrorScalarContext(AdvancedScalarContext):
 class Sparedisks(ONTAPResource):
   """sparedisks - check netapp system spare disks"""
   def probe(self):
-    spare = 0
-    zeroed = 0
-    unassigned = 0
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
-      disks = ODisk.get_collection(fields='container_type,state')
-      for disk in disks:
-        if disk['container_type'] == 'spare':
-          spare += 1
-          if disk['state'] == 'zeroing':
-            zeroed += 1
-        elif disk['container_type'] == 'unassigned':
-          unassigned += 1
-    return [nagiosplugin.Metric(f'zeroing disks', zeroed, context='sparedisks'),
-            nagiosplugin.Metric(f'unassigned disks', unassigned, context='sparedisks')]
+      nodes = Node.get_collection(fields='is_spares_low')
+
+      for node in nodes:
+        yield nagiosplugin.Metric(f'{node.name}', int(node["is_spares_low"]), context='sparedisks')
+
+class SparedisksSummary(nagiosplugin.Summary):
+  """Sparedisk Summary - Return result in a more user friendly way"""
+  def ok(self, results):
+    nodes = []
+    for result in results:
+      if result.state.code != 0:
+        continue
+      nodes.append(result.metric.name)
+    return "Result OK for %s" % ", ".join(nodes)
+
+  def problem(self, results):
+    nodes = []
+    for result in results:
+      if result.state.code == 0:
+        continue
+      nodes.append(result.metric.name)
+    return "Result NOT OK for %s" % ", ".join(nodes)
+
 
 class Volume(ONTAPResource):
   """volume - check volume usage"""
@@ -598,7 +608,8 @@ def main():
   elif args.check == 'sparedisks':
     check = nagiosplugin.Check(
         Sparedisks(args.hostname, args.username, args.password, args.insecure),
-        nagiosplugin.ScalarContext(args.check, critical='0:0')) #, AggrSummary())
+        nagiosplugin.ScalarContext(args.check, critical='0:0'),
+        SparedisksSummary())
   elif args.check == 'volume':
     check = nagiosplugin.Check(
         Volume(args.hostname, args.username, args.password, args.insecure, args.snap_ignore, args.volume, args.volumelist, args.vserver, args.regexp, args.exclude),
