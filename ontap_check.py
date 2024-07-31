@@ -10,12 +10,15 @@ import isodate
 from datetime import timedelta
 import argparse
 import re, sys
-from pprint import pprint as pprint
 
 # disable warnings from the urllib module
 import warnings
 warnings.simplefilter("ignore")
 
+
+# -------------------------
+# Generic classes
+# -------------------------
 class AdvancedScalarContext(nagiosplugin.ScalarContext):
   """Class for defining ScalarContext based on dicts"""
   def evaluate(self, metric, resource):
@@ -35,7 +38,7 @@ class AdvancedSummary(nagiosplugin.Summary):
     metric_names = []
     for result in results:
       if result.metric.name == 'ignore_missing':
-        return f'no {result.metric.value["name"]} available'
+        return f'No {result.metric.value["name"]} available'
 
       metric_names.append(result.metric.name)
 
@@ -49,6 +52,10 @@ class ONTAPResource(nagiosplugin.Resource):
     self.password = password
     self.verify = verify
 
+
+# -------------------------
+# Aggregate classes
+# -------------------------
 class Aggr(ONTAPResource):
   """aggr - Check aggregate real space usage"""
   def __init__(self, hostname, username, password, verify, regexp, aggregate) -> None:
@@ -63,13 +70,6 @@ class Aggr(ONTAPResource):
         if (self.regexp != '' and re.search(self.regexp, aggregate.name)) or (self.aggregate != '' and self.aggregate == aggregate.name):
           yield nagiosplugin.Metric(f'{aggregate.name}', aggregate.space.block_storage.used_percent, '%', context='aggr')
 
-class AggrSummary(nagiosplugin.Summary):
-
-  def ok(self, results):
-    for result in results:
-      print(result)
-    return f'Aggreate size '
-
 class Clusterlinks(ONTAPResource):
   """clusterlinks - check HA-interconnect and cluster links"""
   def probe(self):
@@ -79,6 +79,10 @@ class Clusterlinks(ONTAPResource):
       for peer in peers:
         yield nagiosplugin.Metric(f'{peer.name}', { 'state': peer.status.state, 'ok_condition': ['available'] }, context='clusterlinks')
 
+
+# -------------------------
+# Global classes
+# -------------------------
 class Global(ONTAPResource):
   """global - check powersupplies, fans, nvram status, temp or global health"""
   def __init__(self, hostname, username, password, verify, plugin) -> None:
@@ -166,6 +170,10 @@ class GlobalSummary(nagiosplugin.Summary):
       summary_text = f"Health Status Critical: {', '.join(failed_entities)}"
     return summary_text
 
+
+# -------------------------
+# Disk classes
+# -------------------------
 class Disk(ONTAPResource):
   """disk - check netapp system disk state"""
   def probe(self):
@@ -214,6 +222,10 @@ class DiskScalarContext(nagiosplugin.ScalarContext):
       self.critical = nagiosplugin.Range(None)
     return super().evaluate(metric, resource)
 
+
+# -------------------------
+# Multipath classes
+# -------------------------
 class Multipath(ONTAPResource):
   """multipath - check if all disks are multipathed (4 paths)"""
   def probe(self):
@@ -236,6 +248,10 @@ class Multipath(ONTAPResource):
         if disk.container_type != 'unknown':
           yield nagiosplugin.Metric(f'disk {disk.node.name}/{disk.name} multipath', {'state': len(disk.paths), 'ok_condition': [number_of_paths]}, context='multipath')
 
+
+# -------------------------
+# FCP classes
+# -------------------------
 class Fcp(ONTAPResource):
   """fcp - check fcp interfaces"""
   def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
@@ -255,6 +271,10 @@ class Fcp(ONTAPResource):
       if fc_interface_count == 0 and self.ignore_missing:
         yield nagiosplugin.Metric('ignore_missing', {'name': 'FCP'}, context='fcp')
 
+
+# -------------------------
+# Interface Health classes
+# -------------------------
 class Interface_Health(ONTAPResource):
   """interface_health - check interface status, home-node and home-port"""
   def probe(self):
@@ -269,6 +289,10 @@ class Interface_Health(ONTAPResource):
         yield nagiosplugin.Metric(f'{output_description} node', {'state': interface.location.node.name, 'ok_condition': [interface.location.home_node.name]}, context='interface_health')
         yield nagiosplugin.Metric(f'{output_description} port', {'state': interface.location.port.name, 'ok_condition': [interface.location.home_port.name]}, context='interface_health')
 
+
+# -------------------------
+# Port Health classes
+# -------------------------
 class Port_Health(ONTAPResource):
   """port_health - check if port is enabled and up"""
   def probe(self):
@@ -282,6 +306,10 @@ class Port_Health(ONTAPResource):
         yield nagiosplugin.Metric(f'{output_description} enabled', {'state': interface.enabled, 'ok_condition': [True]}, context='port_health')
         yield nagiosplugin.Metric(f'{output_description} state', {'state': interface.state, 'ok_condition': ['up']}, context='port_health')
 
+
+# -------------------------
+# Snapmirror classes
+# -------------------------
 class Snapmirror(ONTAPResource):
   """snapmirror - check snapmirror healthness"""
   def __init__(self, hostname, username, password, verify, volume, vserver, exclude, regexp, ignore_missing) -> None:
@@ -343,6 +371,10 @@ class SnapmirrorScalarContext(AdvancedScalarContext):
       self.critical = nagiosplugin.Range(None)
     return super().evaluate(metric, resource)
 
+
+# -------------------------
+# Sparedisks classes
+# -------------------------
 class Sparedisks(ONTAPResource):
   """sparedisks - check netapp system spare disks"""
   def probe(self):
@@ -360,7 +392,7 @@ class SparedisksSummary(nagiosplugin.Summary):
       if result.state.code != 0:
         continue
       nodes.append(result.metric.name)
-    return "Result OK for %s" % ", ".join(nodes)
+    return "Check is OK for %s" % ", ".join(nodes)
 
   def problem(self, results):
     nodes = []
@@ -368,9 +400,12 @@ class SparedisksSummary(nagiosplugin.Summary):
       if result.state.code == 0:
         continue
       nodes.append(result.metric.name)
-    return "Result NOT OK for %s" % ", ".join(nodes)
+    return "Check is NOT OK for %s" % ", ".join(nodes)
 
 
+# -------------------------
+# Volume classes
+# -------------------------
 class Volume(ONTAPResource):
   """volume - check volume usage"""
   def __init__(self, hostname, username, password, verify, ignore, volume, volumelist, vserver, regexp, exclude) -> None:
@@ -431,6 +466,10 @@ class VolumeScalarContext(nagiosplugin.ScalarContext):
       self.critical = self.snap_critical
     return super().evaluate(metric, resource)
 
+
+# -------------------------
+# Metrocluster classes
+# -------------------------
 class Metrocluster_State(ONTAPResource):
   """metrocluster_state - check metrocluster state"""
   def __init__(self, hostname, username, password, verify, ignore_missing) -> None:
@@ -529,6 +568,10 @@ class Metrocluster_Aggr(ONTAPResource):
         for check in detail.checks:
           yield nagiosplugin.Metric(f'metrocluster aggregate {detail.aggregate.name} - {check.name}', {'state': check.result, 'ok_condition': ['ok']}, context='metrocluster_aggr')
 
+
+# -------------------------
+# Quota classes
+# -------------------------
 class Quota(ONTAPResource):
   """quota - check quota usage"""
   def __init__(self, hostname, username, password, verify, volume, target, vserver) -> None:
@@ -567,6 +610,10 @@ class Quota(ONTAPResource):
               if quota.qtree.name not in ['', '*']:
                 yield nagiosplugin.Metric(f'quota {quota.volume.name}/{quota.qtree.name}: {space_hard_limit} {quota.space.used.total} {files_hard_limit} {quota.files.used.total}', space_used_hard_limit_percent, '%', context='quota')
 
+
+# -------------------------
+# Volume Health classes
+# -------------------------
 class Volume_Health(ONTAPResource):
   """volume_health - check volume health"""
   def probe(self):
@@ -575,6 +622,10 @@ class Volume_Health(ONTAPResource):
       for volume in volumes:
         yield nagiosplugin.Metric(f'{volume.name}', {'state': volume.state, 'ok_condition': ['online']}, context='volume_health')
 
+
+# -------------------------
+# Node Health classes
+# -------------------------
 class Node_Health(ONTAPResource):
   """node_health - check node health"""
   def probe(self):
@@ -583,6 +634,10 @@ class Node_Health(ONTAPResource):
       for node in nodes:
         yield nagiosplugin.Metric(f'{node.name}', {'state': node.statistics.status, 'ok_condition': ['ok']}, context='node_health')
 
+
+# -------------------------
+# Node CPU classes
+# -------------------------
 class Node_Cpu(ONTAPResource):
   """node_cpu - node cpu utilization"""
   def probe(self):
@@ -592,10 +647,10 @@ class Node_Cpu(ONTAPResource):
         node.get(fields='statistics')
         yield nagiosplugin.Metric(f'{node.name}', node.statistics.processor_utilization_raw / node.statistics.processor_utilization_base * 100, '%', context='node_cpu')
 
-#Node Memory utilization
-#Node virtualization problem
 
-
+# -------------------------
+# Main function
+# -------------------------
 @nagiosplugin.guarded
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
@@ -722,11 +777,11 @@ def main():
 
     check = nagiosplugin.Check(
         Aggr(args.hostname, args.username, args.password, args.insecure, args.regexp, args.aggr),
-        nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
+        nagiosplugin.ScalarContext(args.check, args.warning, args.critical))
   elif args.check == 'clusterlinks':
     check = nagiosplugin.Check(
         Clusterlinks(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'global':
     check = nagiosplugin.Check(
         Global(args.hostname, args.username, args.password, args.insecure, args.plugin),
@@ -735,11 +790,11 @@ def main():
   elif args.check == 'disk':
     check = nagiosplugin.Check(
         Disk(args.hostname, args.username, args.password, args.insecure),
-        DiskScalarContext(args.check, args.warning, args.critical, diskcount=args.disks)) #, AggrSummary())
+        DiskScalarContext(args.check, args.warning, args.critical, diskcount=args.disks))
   elif args.check == 'multipath':
     check = nagiosplugin.Check(
         Multipath(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'fcp':
     check = nagiosplugin.Check(
         Fcp(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
@@ -748,11 +803,11 @@ def main():
   elif args.check == 'interface_health':
     check = nagiosplugin.Check(
         Interface_Health(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'port_health':
     check = nagiosplugin.Check(
         Port_Health(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'snapmirror':
     check = nagiosplugin.Check(
         Snapmirror(args.hostname, args.username, args.password, args.insecure, args.volume, args.vserver, args.exclude, args.regexp, args.ignore_missing),
@@ -766,7 +821,7 @@ def main():
   elif args.check == 'volume':
     check = nagiosplugin.Check(
         Volume(args.hostname, args.username, args.password, args.insecure, args.snap_ignore, args.volume, args.volumelist, args.vserver, args.regexp, args.exclude),
-        VolumeScalarContext(args.check, args.size_warning, args.size_critical, inode_warning=args.inode_warning, inode_critical=args.inode_critical, snap_warning=args.snap_warning, snap_critical=args.snap_critical)) #, AggrSummary())
+        VolumeScalarContext(args.check, args.size_warning, args.size_critical, inode_warning=args.inode_warning, inode_critical=args.inode_critical, snap_warning=args.snap_warning, snap_critical=args.snap_critical))
   elif args.check == 'metrocluster_state':
     check = nagiosplugin.Check(
         Metrocluster_State(args.hostname, args.username, args.password, args.insecure, args.ignore_missing),
@@ -790,19 +845,19 @@ def main():
   elif args.check == 'quota':
     check = nagiosplugin.Check(
         Quota(args.hostname, args.username, args.password, args.insecure, args.volume, args.target, args.vserver),
-        nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
+        nagiosplugin.ScalarContext(args.check, args.warning, args.critical))
   elif args.check == 'volume_health':
     check = nagiosplugin.Check(
         Volume_Health(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'node_health':
     check = nagiosplugin.Check(
         Node_Health(args.hostname, args.username, args.password, args.insecure),
-        AdvancedScalarContext(args.check)) #, AggrSummary())
+        AdvancedScalarContext(args.check))
   elif args.check == 'node_cpu':
     check = nagiosplugin.Check(
         Node_Cpu(args.hostname, args.username, args.password, args.insecure),
-        nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
+        nagiosplugin.ScalarContext(args.check, args.warning, args.critical))
   else:
     sys.exit('Check does not exist. Use --help')
   check.main(verbose=args.verbose)
