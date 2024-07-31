@@ -584,6 +584,9 @@ def main():
   args = parser.parse_args()
 
   if args.check == 'aggr':
+    if len(args.regexp) == 0:
+      args.regexp = '.*'
+
     check = nagiosplugin.Check(
         Aggr(args.hostname, args.username, args.password, args.insecure, args.regexp, args.aggr),
         nagiosplugin.ScalarContext(args.check, args.warning, args.critical)) #, AggrSummary())
