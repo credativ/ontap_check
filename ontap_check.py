@@ -741,7 +741,7 @@ def main():
   parser.add_argument('-v', '--verbose', action='count', default=0,
                     help='increase output verbosity (use up to 3 times)')
   parser.add_argument('--ignore-missing', action='store_true', default=False, help='Ignore entities which do not exist')
-  parser.add_argument('--no-perf-data', action='store_true', default=False, help='Do not show performance data to output')
+  parser.add_argument('--no-perf-data', action='store_true', default=False, help='Do not show performance data')
   subparsers = parser.add_subparsers(dest='check')
   # check aggr
   subparser = subparsers.add_parser('aggr', description="aggr - check aggregate real space usage")
