@@ -61,17 +61,15 @@ class AdvancedSummary(nagiosplugin.Summary):
 
       failed_metric = result.metric.name
 
-      if isinstance(result.metric.value, dict):
-        if 'state' in result.metric.value:
-          failed_metric += f" [{result.metric.value['state']}]"
-        else:
-          failed_metric += f" [{result.metric.value}]"
+      if isinstance(result.metric.value, dict) and 'state' in result.metric.value:
+        value = result.metric.value['state']
       else:
-        failed_metric += f" [{result.metric.value}]"
+        value = result.metric.value
 
+      failed_metric += f' [{value}]'
       failed_metrics.append(failed_metric)
 
-    return f"Check is NOT OK: {' / '.join(failed_metrics)}"
+    return f'Check is NOT OK: {" / ".join(failed_metrics)}'
 
 class ONTAPResource(nagiosplugin.Resource):
   def __init__(self, hostname, username, password, verify) -> None:
@@ -165,38 +163,38 @@ class GlobalSummary(AdvancedSummary):
 
   def ok(self, results):
     result_plugin = None
-    summary_text = "Everything is fine"
+    summary_text = 'Everything is fine'
 
-    if self.plugin == "power":
-      summary_text = "No failed power supplies"
-    elif self.plugin == "fan":
-      summary_text = "No failed fans"
-    elif self.plugin == "nvram":
-      summary_text = "No failed NVRAM"
-    elif self.plugin == "temp":
-      summary_text = "Temperature OK"
-    elif self.plugin == "health":
-      summary_text = "Health Status OK"
+    if self.plugin == 'power':
+      summary_text = 'No failed power supplies'
+    elif self.plugin == 'fan':
+      summary_text = 'No failed fans'
+    elif self.plugin == 'nvram':
+      summary_text = 'No failed NVRAM'
+    elif self.plugin == 'temp':
+      summary_text = 'Temperature OK'
+    elif self.plugin == 'health':
+      summary_text = 'Health Status OK'
     return summary_text
 
   def problem(self, results):
     failed_entities = []
-    summary_text = "An error ocurred"
+    summary_text = 'An error ocurred'
 
     for result in results:
       if result.state.code != 0:
         failed_entities.append(result.metric.name)
 
-    if self.plugin == "power":
-      summary_text = f"{len(failed_entities)} failed power supplie(s): {', '.join(failed_entities)}"
-    elif self.plugin == "fan":
-      summary_text = f"{len(failed_entities)} failed fan(s): {', '.join(failed_entities)}"
-    elif self.plugin == "nvram":
-      summary_text = f"{len(failed_entities)} failed nvram(s): {', '.join(failed_entities)}"
-    elif self.plugin == "temp":
-      summary_text = f"Temperature Overheating: {', '.join(failed_entities)}"
-    elif self.plugin == "health":
-      summary_text = f"Health Status Critical: {', '.join(failed_entities)}"
+    if self.plugin == 'power':
+      summary_text = f'{len(failed_entities)} failed power supplie(s): {", ".join(failed_entities)}'
+    elif self.plugin == 'fan':
+      summary_text = f'{len(failed_entities)} failed fan(s): {", ".join(failed_entities)}'
+    elif self.plugin == 'nvram':
+      summary_text = f'{len(failed_entities)} failed nvram(s): {", ".join(failed_entities)}'
+    elif self.plugin == 'temp':
+      summary_text = f'Temperature Overheating: {", ".join(failed_entities)}'
+    elif self.plugin == 'health':
+      summary_text = f'Health Status Critical: {", ".join(failed_entities)}'
     return summary_text
 
 
@@ -306,7 +304,7 @@ class DiskSummary(AdvancedSummary):
         continue
 
       if isinstance(result.metric.value, dict):
-        if len(result.metric.value["disks"]) > 0:
+        if len(result.metric.value['disks']) > 0:
           disk_state = f'Disk ({", ".join(result.metric.value["disks"])}) - {result.metric.name} [{result.metric.value["amount"]}]'
         else:
           disk_state = f'Disk - {result.metric.name} [{result.metric.value["amount"]}]'
