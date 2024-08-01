@@ -647,15 +647,17 @@ class Metrocluster_Aggr(ONTAPResource):
 # -------------------------
 class Quota(ONTAPResource):
   """quota - check quota usage"""
-  def __init__(self, hostname, username, password, verify, volume, target, vserver) -> None:
+  def __init__(self, hostname, username, password, verify, volume, target, vserver, ignore_missing) -> None:
     super().__init__(hostname, username, password, verify)
     self.volume = volume
     self.target = target
     self.vserver = vserver
+    self.ignore_missing = ignore_missing
 
   def probe(self):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       quotas = QuotaReport.get_collection(fields='files,files.hard_limit,space,space.hard_limit,qtree,svm,volume,type,users')
+      quota_count = 0
       for quota in quotas:
         try:
           files_hard_limit = quota.files.hard_limit
@@ -675,13 +677,18 @@ class Quota(ONTAPResource):
           if quota.type == 'user' and self.target == '':
             for user in quota.users:
               if user.name not in ['', '*']:
+                quota_count += 1
                 yield nagiosplugin.Metric(f'User Quota ({quota.volume.name}/{user.name}) - Space Used', space_used_hard_limit_percent, '%', context='quota')
           elif quota.type == 'tree':
             if self.target != '' and quota.qtree.name != self.target:
               continue
             else:
               if quota.qtree.name not in ['', '*']:
+                quota_count += 1
                 yield nagiosplugin.Metric(f'Tree Quota ({quota.volume.name}/{quota.qtree.name}) - Space Used', space_used_hard_limit_percent, '%', context='quota')
+
+      if quota_count == 0:
+        yield nagiosplugin.Metric('ignore_missing', {'name': 'Quotas'}, context='quota')
 
 
 # -------------------------
@@ -959,8 +966,8 @@ def main():
         AdvancedSummary())
   elif args.check == 'quota':
     check = nagiosplugin.Check(
-        Quota(args.hostname, args.username, args.password, args.insecure, args.volume, args.target, args.vserver),
-        NormalScalarContext(args.check, args.warning, args.critical, no_perf_data=args.no_perf_data),
+        Quota(args.hostname, args.username, args.password, args.insecure, args.volume, args.target, args.vserver, args.ignore_missing),
+        AdvancedScalarContext(args.check, args.warning, args.critical, no_perf_data=args.no_perf_data),
         AdvancedSummary())
   elif args.check == 'volume_health':
     check = nagiosplugin.Check(
