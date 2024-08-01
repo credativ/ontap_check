@@ -49,6 +49,8 @@ optional arguments:
   -p PASSWORD, --password PASSWORD
   -i, --insecure        disable ssl certificate check
   -v, --verbose         increase output verbosity (use up to 3 times)
+  --ignore-missing      Ignore entities which do not exist
+  --no-perf-data        Do not show performance data
 ```
 
 ### check options
