@@ -4,7 +4,7 @@
 
 import nagiosplugin
 from netapp_ontap.host_connection import HostConnection
-from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation, QuotaReport, IpInterface, Shelf
+from netapp_ontap.resources import Aggregate, ClusterPeer, Node, Disk as ODisk, FcInterface, SnapmirrorRelationship, Volume as OVolume, Metrocluster, MetroclusterSvm, MetroclusterDiagnostics, MetroclusterOperation, QuotaReport, IpInterface, Shelf, CLI
 from netapp_ontap.error import NetAppRestError
 import isodate
 from datetime import timedelta
@@ -353,11 +353,18 @@ class Fcp(ONTAPResource):
     with HostConnection(self.hostname, username=self.username, password=self.password, verify=self.verify):
       fc_interfaces = FcInterface.get_collection()
       fc_interface_count = 0
+      response_power_status = CLI().execute("network fcp adapter show", fields="is-sfp-rx-power-in-range,is-sfp-tx-power-in-range")
+
+      status_power_status = response_power_status.http_response.json()
 
       for interface in fc_interfaces:
         fc_interface_count += 1
         interface.get(fields='statistics,metric')
-        yield nagiosplugin.Metric(f'FCP ({interface.name}) - State', { 'state': interface.statistics.status, 'ok_condition': ['ok'] }, context='fcp')
+        yield nagiosplugin.Metric(f'FCP interface ({interface.name}) - State', { 'state': interface.statistics.status, 'ok_condition': ['ok'] }, context='fcp')
+
+      for adapter in status_power_status['records']:
+        yield nagiosplugin.Metric(f'FCP ({adapter["node"]}/{adapter["adapter"]}) - RX power in range', { 'state': adapter['is_sfp_rx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
+        yield nagiosplugin.Metric(f'FCP ({adapter["node"]}/{adapter["adapter"]}) - TX power in range', { 'state': adapter['is_sfp_tx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
 
       if fc_interface_count == 0 and self.ignore_missing:
         yield nagiosplugin.Metric('ignore_missing', {'name': 'FCP'}, context='fcp')
