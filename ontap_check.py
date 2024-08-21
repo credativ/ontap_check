@@ -363,8 +363,8 @@ class Fcp(ONTAPResource):
         yield nagiosplugin.Metric(f'FCP interface ({interface.name}) - State', { 'state': interface.statistics.status, 'ok_condition': ['ok'] }, context='fcp')
 
       for adapter in status_power_status['records']:
-        yield nagiosplugin.Metric(f'FCP RX power in range({adapter["node"]} - {adapter["adapter"]}) - State', { 'state': adapter['is_sfp_rx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
-        yield nagiosplugin.Metric(f'FCP TX power in range({adapter["node"]} - {adapter["adapter"]}) - State', { 'state': adapter['is_sfp_tx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
+        yield nagiosplugin.Metric(f'FCP ({adapter["node"]}/{adapter["adapter"]}) - RX power in range', { 'state': adapter['is_sfp_rx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
+        yield nagiosplugin.Metric(f'FCP ({adapter["node"]}/{adapter["adapter"]}) - TX power in range', { 'state': adapter['is_sfp_tx_power_in_range'], 'ok_condition': ['True'] }, context='fcp')
 
       if fc_interface_count == 0 and self.ignore_missing:
         yield nagiosplugin.Metric('ignore_missing', {'name': 'FCP'}, context='fcp')
